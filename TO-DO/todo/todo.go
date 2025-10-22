@@ -2,8 +2,21 @@ package todo
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 )
+
+var options = &slog.HandlerOptions{
+	// Set the minimum level for logs to be processed.
+	// This will include DEBUG, INFO, WARN, and ERROR messages.
+	Level: slog.LevelDebug,
+
+	// Tell the Logger to include the file name and line number
+	// where the log call was made.
+	AddSource: true,
+}
+
+var Logger = slog.New(slog.NewTextHandler(os.Stdout, options))
 
 type Item struct { // To-Do item structure: names must be capitalized to be exported
 	Name      string
@@ -33,6 +46,9 @@ func SaveToDos(todos []Item) error { //error is a built-in type
 	if err != nil {
 		return err
 	}
+	Logger.Info("To-do data successfully saved to disk",
+		"file", "todos.json",
+		"items_count", len(todos))
 	return nil //must return something of type error
 }
 

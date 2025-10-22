@@ -4,34 +4,41 @@ import (
 	"GoAcademy/TO-DO/todo"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
 func main() {
 
+	slog.SetDefault(todo.Logger)
+
 	currentTime := time.Now()
 	var err error
 	todo.ToDos, err = todo.LoadToDos()
 	if err != nil {
-		fmt.Printf("An error occurred:%s\n", err)
+		todo.Logger.Error("Failed to load to-do data, exiting",
+			"file", "todos.json",
+			"error", err)
 		os.Exit(1)
 	}
-	fmt.Println("Current To-Do List:")
-	fmt.Println(todo.ToDos)
-	fmt.Println("-----")
-	fmt.Println("Available commands: add, list, update, delete,help")
+
+	if len(os.Args) < 2 {
+		todo.Logger.Error("Application terminated due to missing command",
+			"reason", "No command verb provided after executable name.",
+			"usage_tip", "Available commands: add, list, update, delete, help")
+		os.Exit(1)
+	}
 
 	titlePtr := flag.String("t", "", "a title for the to-do item")
 	duePtr := flag.String("d", currentTime.Format("02-01-2006"), "due date for the to-do item")
 	completedPtr := flag.Bool("c", false, "mark the to-do item as completed")
 
-	if len(os.Args) < 2 {
-		fmt.Println("No command provided. Available commands: add")
-		os.Exit(1)
-	}
+	fmt.Println("Current To-Do List:")
+	fmt.Println(todo.ToDos)
+	fmt.Println("-----")
+	fmt.Println("Available commands: add, list, update, delete,help")
 
 	switch os.Args[1] {
 	case "add":
@@ -40,17 +47,24 @@ func main() {
 		due := *duePtr
 		_, err := time.Parse("02-01-2006", due)
 		if err != nil {
-			fmt.Println("Invalid date format - provide format DD-MM-YYYY")
+			todo.Logger.Error("Application terminated due to invalid date format",
+				"reason", "Date format must be DD-MM-YYYY",
+				"usage_tip", "Provide date in format DD-MM-YYYY",
+				"error", err)
 			os.Exit(1) // Exit with status code 1 (indicates an error)
 		}
 		if title == "" {
-			fmt.Println("An error occurred. No title provided. Exiting with status code 1.")
+			todo.Logger.Error("Application terminated due to empty title field",
+				"reason", "Title cannot be empty",
+				"usage_tip", "When adding a to-do item, provide a title using the -t flag")
 			os.Exit(1) // Exit with status code 1 (indicates an error)
 		}
 		todo.AddToDo(title, due)
 		err = todo.SaveToDos(todo.ToDos)
 		if err != nil {
-			fmt.Printf("An error occurred while saving: %s\n", err)
+			todo.Logger.Error("Failed to save to-do data, exiting",
+				"file", "todos.json",
+				"error", err)
 			os.Exit(1)
 		}
 		fmt.Println("Item added to list.")
@@ -63,63 +77,78 @@ func main() {
 		os.Exit(0)
 	case "update":
 		if len(os.Args) < 3 {
-			fmt.Println("Invalid command. Usage: update <index> [options]")
+			todo.Logger.Error("Application terminated due to invalid update command",
+				"reason", "index argument missing or options not provided",
+				"usage_tip", "Provide the index of the to-do item to update (first item is index 0) followed by at least one option to update. Usage: update <index> [options]")
 			os.Exit(1)
 		}
 
 		indexStr := os.Args[2]
 		index, err := strconv.Atoi(indexStr)
 		if err != nil || index < 0 || index >= len(todo.ToDos) {
-			fmt.Println("Invalid index provided.")
+			todo.Logger.Error("Application terminated due to invalid update command",
+				"reason", "index argument missing or invalid",
+				"usage_tip", "Provide the index of the to-do item to update in the form of an integer (first item is index 0). Can't be greater than the number of items in the list.",
+				"error", err)
 			os.Exit(1)
 		}
 
 		flag.CommandLine.Parse(os.Args[3:])
 		if flag.NFlag() == 0 {
-			fmt.Println("No flags provided. Usage: update <index> [options]")
+			todo.Logger.Error("Application terminated due to invalid update command",
+				"reason", "No flags provided.",
+				"usage_tip", "Provide at least one option to update. Usage: update <index> [options]")
 			os.Exit(1)
 		}
 
-		title := *titlePtr
-		due := *duePtr
-		completed := *completedPtr
 		item := todo.ToDos[index]
-		if item.Name != title && title != "" {
-			item.Name = title
-		}
-		for _, arg := range os.Args[3:] {
-			if strings.HasPrefix(arg, "-d") {
-				item.Due = due
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "t":
+				// Update Title if -t was explicitly set
+				item.Name = *titlePtr
+			case "d":
+				// Update Due Date if -d was explicitly set
+				item.Due = *duePtr
+			case "c":
+				// Update Completed status if -c was explicitly set
+				// Note: You must ensure item is mutable (e.g., a pointer or assigned back to the slice)
+				item.Completed = *completedPtr
 			}
-		}
-		for _, arg := range os.Args[3:] {
-			if strings.HasPrefix(arg, "-c") {
-				item.Completed = completed
-			}
-		}
+		})
+
 		todo.ToDos[index] = item
 		fmt.Println("Item updated.")
 		err = todo.SaveToDos(todo.ToDos)
 		if err != nil {
-			fmt.Printf("An error occurred while saving: %s\n", err)
+			todo.Logger.Error("Application terminated due to error saving updated to-do data",
+				"file", "todos.json",
+				"error", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
 	case "delete":
 		if len(os.Args) < 3 {
-			fmt.Println("Invalid command. Usage: delete <index>")
+			todo.Logger.Error("Application terminated due to invalid delete command",
+				"reason", "index argument missing",
+				"usage_tip", "Provide the index of the to-do item to delete (first item is index 0).")
 			os.Exit(1)
 		}
 		indexStr := os.Args[2]
 		index, err := strconv.Atoi(indexStr)
 		if err != nil || index < 0 || index >= len(todo.ToDos) {
-			fmt.Println("Invalid index provided.")
+			todo.Logger.Error("Application terminated due to invalid delete command",
+				"reason", "index argument missing or invalid",
+				"usage_tip", "Provide the index of the to-do item to delete in the form of an integer (first item is index 0). Can't be greater than the number of items in the list.",
+				"error", err)
 			os.Exit(1)
 		}
 		todo.RemoveToDo(index)
 		err = todo.SaveToDos(todo.ToDos)
 		if err != nil {
-			fmt.Printf("An error occurred while saving: %s\n", err)
+			todo.Logger.Error("Application terminated due to error saving updated to-do data",
+				"file", "todos.json",
+				"error", err)
 			os.Exit(1)
 		}
 		fmt.Println("Item deleted from list.")
@@ -139,7 +168,9 @@ func main() {
 
 	err = todo.SaveToDos(todo.ToDos)
 	if err != nil {
-		fmt.Printf("An error occurred:%s\n", err)
+		todo.Logger.Error("Application terminated due to error saving updated to-do data",
+			"file", "todos.json",
+			"error", err)
 		os.Exit(1)
 	}
 
