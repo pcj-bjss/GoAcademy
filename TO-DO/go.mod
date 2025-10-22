@@ -1,3 +1,3 @@
-module github.com/pcj-bjss/GoAcademy/to-do
+module GoAcademy/TO-DO
 
 go 1.25.1
