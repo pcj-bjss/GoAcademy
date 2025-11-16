@@ -2,30 +2,77 @@ package main
 
 import (
 	"GoAcademy/TO-DO/todo"
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+type contextKey string
+
+const traceIDKey contextKey = "TraceID"
+
+// dynamic extractor struct
+type traceIDExtractor struct{}
+
+func (t traceIDExtractor) LogValue() slog.Value {
+	// This function runs at log time. It returns a function that takes context
+	// and returns the actual log value. This is the idiomatic pattern for this.
+	return slog.AnyValue(func(ctx context.Context) slog.Value {
+		// Safely retrieve the TraceID from the context
+		if id, ok := ctx.Value(traceIDKey).(string); ok {
+			return slog.StringValue(id)
+		}
+		// If not found (e.g., logging outside of a traced call)
+		return slog.StringValue("NO_TRACE_ID")
+	})
+}
 
 func main() {
 
-	slog.SetDefault(todo.Logger)
+	// Configure application logger and set it as the global default.
+	options := &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: true,
+	}
+	appLogger := slog.New(slog.NewTextHandler(os.Stdout, options))
+
+	//Every single log message the logger generates must permanently include a field named "traceID".
+	//The value for that field is NOT a static string but the dynamic extractor struct we created.
+	appLogger = appLogger.With(
+		slog.Attr{
+			Key:   "traceID",
+			Value: slog.AnyValue(traceIDExtractor{}),
+		},
+	)
+
+	slog.SetDefault(appLogger)
+
+	ctx := context.WithValue(context.Background(), traceIDKey, uuid.New().String())
 
 	currentTime := time.Now()
 	var err error
 	todo.ToDos, err = todo.LoadToDos()
 	if err != nil {
-		todo.Logger.Error("Failed to load to-do data, exiting",
+		slog.Default().Log(
+			ctx,
+			slog.LevelError,
+			"Failed to load to-do data, exiting",
 			"file", "todos.json",
 			"error", err)
 		os.Exit(1)
 	}
 
 	if len(os.Args) < 2 {
-		todo.Logger.Error("Application terminated due to missing command",
+		slog.Default().Log(
+			ctx,
+			slog.LevelError,
+			"Application terminated due to missing command",
 			"reason", "No command verb provided after executable name.",
 			"usage_tip", "Available commands: add, list, update, delete, help")
 		os.Exit(1)
@@ -47,22 +94,32 @@ func main() {
 		due := *duePtr
 		_, err := time.Parse("02-01-2006", due)
 		if err != nil {
-			todo.Logger.Error("Application terminated due to invalid date format",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to invalid date format",
 				"reason", "Date format must be DD-MM-YYYY",
 				"usage_tip", "Provide date in format DD-MM-YYYY",
 				"error", err)
 			os.Exit(1) // Exit with status code 1 (indicates an error)
 		}
 		if title == "" {
-			todo.Logger.Error("Application terminated due to empty title field",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+
+				"Application terminated due to empty title field",
 				"reason", "Title cannot be empty",
 				"usage_tip", "When adding a to-do item, provide a title using the -t flag")
 			os.Exit(1) // Exit with status code 1 (indicates an error)
 		}
 		todo.AddToDo(title, due)
-		err = todo.SaveToDos(todo.ToDos)
+		err = todo.SaveToDos(todo.ToDos, ctx)
 		if err != nil {
-			todo.Logger.Error("Failed to save to-do data, exiting",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Failed to save to-do data, exiting",
 				"file", "todos.json",
 				"error", err)
 			os.Exit(1)
@@ -77,7 +134,10 @@ func main() {
 		os.Exit(0)
 	case "update":
 		if len(os.Args) < 3 {
-			todo.Logger.Error("Application terminated due to invalid update command",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to invalid update command",
 				"reason", "index argument missing or options not provided",
 				"usage_tip", "Provide the index of the to-do item to update (first item is index 0) followed by at least one option to update. Usage: update <index> [options]")
 			os.Exit(1)
@@ -86,7 +146,10 @@ func main() {
 		indexStr := os.Args[2]
 		index, err := strconv.Atoi(indexStr)
 		if err != nil || index < 0 || index >= len(todo.ToDos) {
-			todo.Logger.Error("Application terminated due to invalid update command",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to invalid update command",
 				"reason", "index argument missing or invalid",
 				"usage_tip", "Provide the index of the to-do item to update in the form of an integer (first item is index 0). Can't be greater than the number of items in the list.",
 				"error", err)
@@ -95,7 +158,10 @@ func main() {
 
 		flag.CommandLine.Parse(os.Args[3:])
 		if flag.NFlag() == 0 {
-			todo.Logger.Error("Application terminated due to invalid update command",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to invalid update command",
 				"reason", "No flags provided.",
 				"usage_tip", "Provide at least one option to update. Usage: update <index> [options]")
 			os.Exit(1)
@@ -119,9 +185,12 @@ func main() {
 
 		todo.ToDos[index] = item
 		fmt.Println("Item updated.")
-		err = todo.SaveToDos(todo.ToDos)
+		err = todo.SaveToDos(todo.ToDos, ctx)
 		if err != nil {
-			todo.Logger.Error("Application terminated due to error saving updated to-do data",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to error saving updated to-do data",
 				"file", "todos.json",
 				"error", err)
 			os.Exit(1)
@@ -129,7 +198,10 @@ func main() {
 		os.Exit(0)
 	case "delete":
 		if len(os.Args) < 3 {
-			todo.Logger.Error("Application terminated due to invalid delete command",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to invalid delete command",
 				"reason", "index argument missing",
 				"usage_tip", "Provide the index of the to-do item to delete (first item is index 0).")
 			os.Exit(1)
@@ -137,16 +209,22 @@ func main() {
 		indexStr := os.Args[2]
 		index, err := strconv.Atoi(indexStr)
 		if err != nil || index < 0 || index >= len(todo.ToDos) {
-			todo.Logger.Error("Application terminated due to invalid delete command",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to invalid delete command",
 				"reason", "index argument missing or invalid",
 				"usage_tip", "Provide the index of the to-do item to delete in the form of an integer (first item is index 0). Can't be greater than the number of items in the list.",
 				"error", err)
 			os.Exit(1)
 		}
 		todo.RemoveToDo(index)
-		err = todo.SaveToDos(todo.ToDos)
+		err = todo.SaveToDos(todo.ToDos, ctx)
 		if err != nil {
-			todo.Logger.Error("Application terminated due to error saving updated to-do data",
+			slog.Default().Log(
+				ctx,
+				slog.LevelError,
+				"Application terminated due to error saving updated to-do data",
 				"file", "todos.json",
 				"error", err)
 			os.Exit(1)
@@ -166,9 +244,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = todo.SaveToDos(todo.ToDos)
+	err = todo.SaveToDos(todo.ToDos, ctx)
 	if err != nil {
-		todo.Logger.Error("Application terminated due to error saving updated to-do data",
+		slog.Default().Log(
+			ctx,
+			slog.LevelError,
+			"Application terminated due to error saving updated to-do data",
 			"file", "todos.json",
 			"error", err)
 		os.Exit(1)
