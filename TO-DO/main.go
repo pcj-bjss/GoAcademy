@@ -57,7 +57,8 @@ func main() {
 
 	currentTime := time.Now()
 	var err error
-	todo.ToDos, err = todo.LoadToDos()
+	var filename string = "todos.json"
+	todo.ToDos, err = todo.LoadToDos(filename, ctx)
 	if err != nil {
 		slog.Default().Log(
 			ctx,
@@ -114,7 +115,7 @@ func main() {
 			os.Exit(1) // Exit with status code 1 (indicates an error)
 		}
 		todo.AddToDo(title, due)
-		err = todo.SaveToDos(todo.ToDos, ctx)
+		err = todo.SaveToDos(filename, todo.ToDos, ctx)
 		if err != nil {
 			slog.Default().Log(
 				ctx,
@@ -185,7 +186,7 @@ func main() {
 
 		todo.ToDos[index] = item
 		fmt.Println("Item updated.")
-		err = todo.SaveToDos(todo.ToDos, ctx)
+		err = todo.SaveToDos(filename, todo.ToDos, ctx)
 		if err != nil {
 			slog.Default().Log(
 				ctx,
@@ -219,7 +220,7 @@ func main() {
 			os.Exit(1)
 		}
 		todo.RemoveToDo(index)
-		err = todo.SaveToDos(todo.ToDos, ctx)
+		err = todo.SaveToDos(filename, todo.ToDos, ctx)
 		if err != nil {
 			slog.Default().Log(
 				ctx,
@@ -244,7 +245,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = todo.SaveToDos(todo.ToDos, ctx)
+	err = todo.SaveToDos(filename, todo.ToDos, ctx)
 	if err != nil {
 		slog.Default().Log(
 			ctx,
