@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,6 +56,11 @@ func main() {
 	slog.SetDefault(appLogger)
 
 	ctx := context.WithValue(context.Background(), traceIDKey, uuid.New().String())
+
+	// Set up signal handling to gracefully handle termination signals
+	// SIGINT is Ctrl+C. SIGTERM is a generic termination signal (e.g., from a 'kill' command).
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	currentTime := time.Now()
 	var err error
@@ -128,7 +135,7 @@ func main() {
 		fmt.Println("Item added to list.")
 		// Handle "add" command
 		// e.g., parse flags and add a to-do item
-		os.Exit(0)
+		//os.Exit(0) - removing to allow graceful shutdown handling
 
 	case "list":
 		fmt.Println(todo.ToDos)
@@ -196,7 +203,7 @@ func main() {
 				"error", err)
 			os.Exit(1)
 		}
-		os.Exit(0)
+		//os.Exit(0) - removing to allow graceful shutdown handling
 	case "delete":
 		if len(os.Args) < 3 {
 			slog.Default().Log(
@@ -231,7 +238,7 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("Item deleted from list.")
-		os.Exit(0)
+		//os.Exit(0) - removing to allow graceful shutdown handling
 	case "help":
 		fmt.Println("Available commands:")
 		fmt.Println("  add    -t <title> -d <due date>       Add a new to-do item")
@@ -245,6 +252,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	slog.Default().Log(
+		ctx,
+		slog.LevelInfo,
+		"Application running, blocked awaiting signal...",
+	)
+
+	// Block the main goroutine until an interrupt signal is received
+	sig := <-sigChan
+
+	slog.Default().Log(
+		ctx,
+		slog.LevelInfo,
+		"Received signal, commencing graceful shutdown.",
+		slog.String("signal", sig.String()),
+	)
+
 	err = todo.SaveToDos(filename, todo.ToDos, ctx)
 	if err != nil {
 		slog.Default().Log(
@@ -255,5 +278,5 @@ func main() {
 			"error", err)
 		os.Exit(1)
 	}
-
+	os.Exit(0)
 }
