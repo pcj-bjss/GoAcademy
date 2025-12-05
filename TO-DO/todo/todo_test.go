@@ -12,6 +12,7 @@ import (
 // (t *testing.T) is the mandatory parameter.
 // It accepts a pointer to a testing.T struct from the testing package.
 // The t variable provides all the methods you use to manage your test: logging messages (t.Log()), marking a test as failed (t.Errorf()), or stopping a test immediately (t.Fatalf()).
+
 func TestLoadToDos_EmptyFile(t *testing.T) {
 	// Set up a temporary file to simulate an empty todos.json
 	// <file>_* is the filename pattern. Go replaces the * with a random, unique string (e.g., todos_123456.json) to guarantee no two tests will overwrite each other.
@@ -61,6 +62,7 @@ func TestLoadToDos_NonExistentFile(t *testing.T) {
 }
 
 func TestLoadToDos_HappyPath(t *testing.T) {
+
 	// Set up a temporary file with valid JSON data
 	tmpFile, err := os.CreateTemp("", "todos_*.json")
 	if err != nil {
@@ -128,15 +130,15 @@ func TestSaveToDos(t *testing.T) {
 	defer os.Remove(tmpFileName)
 	tmpFile.Close()
 
+	ctx := context.Background() // Create a dummy context to satisfy logging requirements
 	tmpStruct := []Item{}
 	originalToDos := ToDos
 	ToDos = tmpStruct
 	defer func() { ToDos = originalToDos }()
 	// Add sample todos
-	AddToDo("ToDo 1", "2024-12-01T10:00:00Z")
-	AddToDo("ToDo 2", "2024-12-02T11:00:00Z")
+	AddToDo("ToDo 1", "2024-12-01T10:00:00Z", ctx)
+	AddToDo("ToDo 2", "2024-12-02T11:00:00Z", ctx)
 
-	ctx := context.Background()
 	// Test 1 (No Error):
 	saveErr := SaveToDos(tmpFileName, ToDos, ctx)
 	if saveErr != nil {
@@ -170,9 +172,10 @@ func TestAddToDo(t *testing.T) {
 	ToDos = tmpStruct
 	defer func() { ToDos = originalToDos }() // Restore original after test
 	// Test adding a new to-do
+	ctx := context.Background() // Create a dummy context to satisfy logging requirements
 	todoName := "New Test ToDo"
 	todoDue := "2024-11-30T18:00:00Z"
-	AddToDo(todoName, todoDue)
+	AddToDo(todoName, todoDue, ctx)
 
 	// Test 1 (Item Added):
 	if len(ToDos) != 1 {
@@ -188,13 +191,14 @@ func TestRemoveToDo(t *testing.T) {
 	tmpStruct := []Item{}
 	originalToDos := ToDos
 	ToDos = tmpStruct
+	ctx := context.Background() // Create a dummy context to satisfy logging requirements
 	defer func() { ToDos = originalToDos }()
 	// Add sample todos
-	AddToDo("ToDo 1", "2024-12-01T10:00:00Z")
-	AddToDo("ToDo 2", "2024-12-02T11:00:00Z")
-	AddToDo("ToDo 3", "2024-12-03T12:00:00Z")
+	AddToDo("ToDo 1", "2024-12-01T10:00:00Z", ctx)
+	AddToDo("ToDo 2", "2024-12-02T11:00:00Z", ctx)
+	AddToDo("ToDo 3", "2024-12-03T12:00:00Z", ctx)
 	// Test removing the second to-do (index 1)
-	RemoveToDo(1)
+	RemoveToDo(1, ctx)
 	// Test 1 (Item Removed):
 	if len(ToDos) != 2 {
 		t.Fatalf("Expected 2 todos after removal, got %d", len(ToDos))

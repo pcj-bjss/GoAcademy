@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 )
+
+var Filename string = "todos.json"
 
 type Item struct { // To-Do item structure: names must be capitalized to be exported
 	Name      string
@@ -15,14 +18,49 @@ type Item struct { // To-Do item structure: names must be capitalized to be expo
 }
 
 var ToDos []Item
+var ToDosMutex sync.RWMutex //
 
-func AddToDo(name string, due string) {
+func AddToDo(name string, due string, ctx context.Context) error {
 	task := Item{Name: name, Due: due} //Completed defaults to false
 	ToDos = append(ToDos, task)
+	slog.Default().Log(
+		ctx,
+		slog.LevelInfo,
+		"To-do data successfully added",
+		"name", name,
+		"due", due)
+	return nil //must return something of type error
 }
 
-func RemoveToDo(index int) {
+func RemoveToDo(index int, ctx context.Context) error {
 	ToDos = append(ToDos[:index], ToDos[index+1:]...) //ellipsis to flatten slice
+	slog.Default().Log(
+		ctx,
+		slog.LevelInfo,
+		"To-do data successfully removed",
+		"index", index)
+	return nil //must return something of type error
+}
+
+func UpdateToDo(index int, name *string, due *string, completed *bool, ctx context.Context) error {
+	if name != nil {
+		ToDos[index].Name = *name
+	}
+	if due != nil {
+		ToDos[index].Due = *due
+	}
+	if completed != nil {
+		ToDos[index].Completed = *completed
+	}
+	slog.Default().Log(
+		ctx,
+		slog.LevelInfo,
+		"To-do data successfully updated",
+		"index", index,
+		"name_updated", name != nil,
+		"due_updated", due != nil,
+		"completed_updated", completed != nil)
+	return nil //must return something of type error
 }
 
 func SaveToDos(filename string, todos []Item, ctx context.Context) error { //error is a built-in type
@@ -40,7 +78,7 @@ func SaveToDos(filename string, todos []Item, ctx context.Context) error { //err
 		ctx,
 		slog.LevelInfo,
 		"To-do data successfully saved to disk",
-		"file", "todos.json",
+		"file", filename,
 		"items_count", len(todos))
 	return nil //must return something of type error
 }
