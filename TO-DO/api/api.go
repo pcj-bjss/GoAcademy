@@ -3,6 +3,7 @@ package api
 import (
 	"GoAcademy/TO-DO/todo"
 	"encoding/json"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -17,33 +18,40 @@ func GetHandler(w http.ResponseWriter, r *http.Request) {
 		"Received GET request for to-do list.")
 	w.Header().Set("Content-Type", "application/json")
 
-	todo.ToDosMutex.RLock()
-	defer todo.ToDosMutex.RUnlock()
-
-	data, err := json.MarshalIndent(todo.ToDos, "", "  ")
-
-	if err != nil {
-		// If conversion fails, log the error and send a 500 status.
-		slog.Default().Log(
-			r.Context(),
-			slog.LevelError,
-			"Failed to encode to-do list to JSON.",
-			"error", err,
-		)
-		// http.Error is a convenience function that sets the status code and writes the message.
-		http.Error(w, "Internal server error: Could not format list data.", http.StatusInternalServerError)
-		return
+	// Create the command to send to the actor
+	cmd := todo.Command{
+		Action:  todo.OpGet,
+		Ctx:     r.Context(),
+		Result:  make(chan any), // The Command creates a new channel specific to the request to receive the response from the actor
+		ErrChan: make(chan error),
 	}
-	w.WriteHeader(http.StatusOK) // Status 200 OK
-	w.Write(data)
+	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'get' command to actor.")
+	//cmd is sent to the actor via the Store channel
+	todo.Store <- cmd
 
-	slog.Default().Log(
-		r.Context(),
-		slog.LevelInfo,
-		"To-do list successfully encoded and sent to client.",
-		"items_count", len(todo.ToDos),
-	)
+	// Wait for the response from the actor
+	select {
+	// The select statement waits on multiple channel operations, allowing us to handle whichever one completes first.
+	// Here, we wait for either a result or an error from the actor.
+	// If the actor sends a result via the Result channel, we handle it.
+	// In the case of OpGet, the result will be the list of to-do items.
+	case result := <-cmd.Result:
+		slog.Default().Log(r.Context(), slog.LevelInfo, "Received successful result from actor.")
+		// Type assertion to convert the result back to the expected type ([]todo.Item)
+		todos, ok := result.([]todo.Item)
+		if !ok {
+			slog.Default().Log(r.Context(), slog.LevelError, "Actor returned invalid result type.")
+			http.Error(w, "Internal server error: invalid result type", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(todos)
+		slog.Default().Log(r.Context(), slog.LevelInfo, "Successfully sent to-do list to client.", "items_count", len(todos))
 
+	case err := <-cmd.ErrChan:
+		slog.Default().Log(r.Context(), slog.LevelError, "Actor returned an error.", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -104,49 +112,52 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Default().Log(
 		r.Context(),
 		slog.LevelInfo,
-		"Input data validation successful. Acquiring write lock.",
+		"Input data validation successful.",
 		"name", t.Name,
 		"due", t.Due,
 	)
 
-	todo.ToDosMutex.Lock()
-	defer todo.ToDosMutex.Unlock()
+	cmd := todo.Command{
+		Action:  todo.OpAdd,
+		Ctx:     r.Context(),
+		Item:    t,
+		Result:  make(chan any), // The Command creates a new channel specific to the request to receive the response from the actor
+		ErrChan: make(chan error),
+	}
+	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'add' command to actor.")
+	//cmd is sent to the actor via the Store channel
+	todo.Store <- cmd
 
-	todo.AddToDo(t.Name, t.Due, r.Context())
-	if err := todo.SaveToDos(todo.Filename, todo.ToDos, r.Context()); err != nil {
-		// If saving fails, it is a critical server error (500), not a client error (400).
+	// Wait for the response from the actor
+	select {
+	// The select statement waits on multiple channel operations, allowing us to handle whichever one completes first.
+	// Here, we wait for either a result or an error from the actor.
+	// If the actor sends a result via the Result channel, we handle it.
+	// In the case of OpAdd, the result will be the Item that was added.
+	case result := <-cmd.Result:
 		slog.Default().Log(
 			r.Context(),
-			slog.LevelError,
-			"Failed to save to-do data after addition.",
-			"file", todo.Filename,
-			"error", err,
+			slog.LevelInfo,
+			"Received successful result from actor.",
+			"name", result.(todo.Item).Name,
+			"due", result.(todo.Item).Due,
 		)
 
-		// Send 500 Internal Server Error
-		http.Error(w, "Internal Server Error: Failed to save changes to disk.", http.StatusInternalServerError)
-		return
+		w.WriteHeader(http.StatusCreated) // 201 Created
+		w.Write([]byte(`{"status": "success","message":"To-do item created successfully."}`))
+		slog.Default().Log(
+			r.Context(),
+			slog.LevelInfo,
+			"Response sent to client.",
+			"status", "201 Created",
+		)
+
+	case err := <-cmd.ErrChan:
+		slog.Default().Log(r.Context(), slog.LevelError, "Actor returned an error.", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-
-	slog.Default().Log(
-		r.Context(),
-		slog.LevelInfo,
-		"New item successfully added and saved to disk.",
-		"name", t.Name,
-		"due", t.Due,
-	)
-
-	w.WriteHeader(http.StatusCreated) // 201 Created
-	w.Write([]byte(`{"status": "success","message":"To-do item created successfully."}`))
-	slog.Default().Log(
-		r.Context(),
-		slog.LevelInfo,
-		"Response sent to client.",
-		"status", "201 Created",
-	)
 }
 
-// Handler skeletons for other endpoints
 func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Default().Log(
 		r.Context(),
@@ -168,7 +179,7 @@ func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Index     int     `json:"index"`
+		ID        int     `json:"id"`
 		Name      *string `json:"name,omitempty"`
 		Due       *string `json:"due,omitempty"`
 		Completed *bool   `json:"completed,omitempty"`
@@ -185,55 +196,52 @@ func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Validate index
-	if req.Index < 0 || req.Index >= len(todo.ToDos) {
+	cmd := todo.Command{
+		Action: todo.OpUpdate,
+		Ctx:    r.Context(),
+		UpdatePayload: struct {
+			Name      *string
+			Due       *string
+			Completed *bool
+		}{Name: req.Name, Due: req.Due, Completed: req.Completed},
+		ID:      req.ID,
+		Result:  make(chan any), // The Command creates a new channel specific to the request to receive the response from the actor
+		ErrChan: make(chan error),
+	}
+	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'update' command to actor.")
+	//cmd is sent to the actor via the Store channel
+	todo.Store <- cmd
+
+	// Wait for the response from the actor
+	select {
+	// The select statement waits on multiple channel operations, allowing us to handle whichever one completes first.
+	// Here, we wait for either a result or an error from the actor.
+	// If the actor sends a result via the Result channel, we handle it.
+	// In the case of OpUpdate, the result will be the Item that was updated.
+	case result := <-cmd.Result:
 		slog.Default().Log(
 			r.Context(),
-			slog.LevelWarn,
-			"Update request with out-of-bounds index.",
-			"index", req.Index,
+			slog.LevelInfo,
+			"Received successful result from actor.",
+			"id", result.(todo.Item).ID,
+			"name", result.(todo.Item).Name,
+			"due", result.(todo.Item).Due,
 		)
 
-		http.Error(w, "Bad Request: Index out of bounds", http.StatusBadRequest)
-		return
-	}
-
-	todo.ToDosMutex.Lock()
-	defer todo.ToDosMutex.Unlock()
-
-	// Perform the update
-	todo.UpdateToDo(req.Index, req.Name, req.Due, req.Completed, r.Context())
-
-	// Save the updated list
-	if err := todo.SaveToDos(todo.Filename, todo.ToDos, r.Context()); err != nil {
-		// If saving fails, it is a critical server error (500), not a client error (400).
+		w.WriteHeader(http.StatusCreated) // 201 Created
+		w.Write([]byte(`{"status": "success","message":"To-do item updated successfully."}`))
 		slog.Default().Log(
 			r.Context(),
-			slog.LevelError,
-			"Failed to save to-do data after update.",
-			"file", todo.Filename,
-			"error", err,
+			slog.LevelInfo,
+			"Response sent to client.",
+			"status", "201 Created",
 		)
 
-		// Send 500 Internal Server Error
-		http.Error(w, "Internal Server Error: Failed to save changes to disk.", http.StatusInternalServerError)
-		return
+	case err := <-cmd.ErrChan:
+		slog.Default().Log(r.Context(), slog.LevelError, "Actor returned an error.", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
-	slog.Default().Log(
-		r.Context(),
-		slog.LevelInfo,
-		"To-do item successfully updated and saved to disk.",
-	)
-
-	w.WriteHeader(http.StatusCreated) // 201 Created
-	w.Write([]byte(`{"status": "success","message":"To-do item updated successfully."}`))
-	slog.Default().Log(
-		r.Context(),
-		slog.LevelInfo,
-		"Response sent to client.",
-		"status", "201 Created",
-	)
 }
 
 func DeleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -256,59 +264,111 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := r.URL.Query().Get("index")
+	q := r.URL.Query().Get("id")
 	if q == "" {
 		slog.Default().Log(
 			r.Context(),
 			slog.LevelWarn,
-			"Delete request missing index parameter.",
+			"Delete request missing id parameter.",
 		)
-		http.Error(w, "Bad Request: missing index parameter", http.StatusBadRequest)
+		http.Error(w, "Bad Request: missing id parameter", http.StatusBadRequest)
 		return
 	}
-	idx, err := strconv.Atoi(q)
+	id, err := strconv.Atoi(q)
 	if err != nil {
 		slog.Default().Log(
 			r.Context(),
 			slog.LevelWarn,
-			"Delete request has invalid index parameter.",
+			"Delete request has invalid id parameter.",
 		)
-		http.Error(w, "Bad Request: invalid index", http.StatusBadRequest)
+		http.Error(w, "Bad Request: invalid id", http.StatusBadRequest)
 		return
 	}
 
-	todo.ToDosMutex.Lock()
-	defer todo.ToDosMutex.Unlock()
+	cmd := todo.Command{
+		Action:  todo.OpUpdate,
+		Ctx:     r.Context(),
+		ID:      id,
+		Result:  make(chan any), // The Command creates a new channel specific to the request to receive the response from the actor
+		ErrChan: make(chan error),
+	}
+	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'update' command to actor.")
+	//cmd is sent to the actor via the Store channel
+	todo.Store <- cmd
 
-	if idx < 0 || idx >= len(todo.ToDos) {
+	// Wait for the response from the actor
+	select {
+	// The select statement waits on multiple channel operations, allowing us to handle whichever one completes first.
+	// Here, we wait for either a result or an error from the actor.
+	// If the actor sends a result via the Result channel, we handle it.
+	// In the case of OpUpdate, the result will be the Item that was updated.
+	case result := <-cmd.Result:
 		slog.Default().Log(
 			r.Context(),
-			slog.LevelWarn,
-			"Delete request has out of range index parameter.",
+			slog.LevelInfo,
+			"Received successful result from actor.",
+			"id", result.(todo.Item).ID,
+			"name", result.(todo.Item).Name,
+			"due", result.(todo.Item).Due,
 		)
-		http.Error(w, "Not Found: index out of range", http.StatusNotFound)
-		return
-	}
 
-	todo.RemoveToDo(idx, r.Context())
-	if err := todo.SaveToDos(todo.Filename, todo.ToDos, r.Context()); err != nil {
+		w.WriteHeader(http.StatusCreated) // 201 Created
+		w.Write([]byte(`{"status": "success","message":"To-do item updated successfully."}`))
 		slog.Default().Log(
 			r.Context(),
-			slog.LevelError,
-			"Failed to save to-do data after delete.",
-			"file", todo.Filename,
-			"error", err,
+			slog.LevelInfo,
+			"Response sent to client.",
+			"status", "201 Created",
 		)
-		http.Error(w, "Internal Server Error: failed to persist changes", http.StatusInternalServerError)
-		return
+
+	case err := <-cmd.ErrChan:
+		slog.Default().Log(r.Context(), slog.LevelError, "Actor returned an error.", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
-	w.WriteHeader(http.StatusNoContent) // 204 No Content
+}
+
+var listTmpl = template.Must(template.ParseFiles("web/templates/list.html"))
+
+func ListHandler(w http.ResponseWriter, r *http.Request) {
 	slog.Default().Log(
 		r.Context(),
 		slog.LevelInfo,
-		"To-do item successfully deleted and changes saved to disk.",
-		"index", idx,
+		"Received LIST request for to-do list page.",
 	)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	// Create the command to send to the actor to get the list of items
+	cmd := todo.Command{
+		Action:  todo.OpGet,
+		Ctx:     r.Context(),
+		Result:  make(chan any),
+		ErrChan: make(chan error),
+	}
+	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'get' command to actor for list page.")
+	todo.Store <- cmd
+
+	// Wait for the response from the actor
+	select {
+	case result := <-cmd.Result:
+		slog.Default().Log(r.Context(), slog.LevelInfo, "Received successful result from actor for list page.")
+		items, ok := result.([]todo.Item)
+		if !ok {
+			slog.Default().Log(r.Context(), slog.LevelError, "Actor returned invalid result type for list page.")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		slog.Default().Log(r.Context(), slog.LevelInfo, "Rendering list page", "items_count", len(items))
+		if err := listTmpl.Execute(w, items); err != nil {
+			slog.Default().Log(r.Context(), slog.LevelError, "Failed to render to-do list template.", "error", err)
+			http.Error(w, "Internal Server Error: could not render page", http.StatusInternalServerError)
+			return
+		}
+		slog.Default().Log(r.Context(), slog.LevelInfo, "To-do list page successfully rendered and sent to client.", "items_count", len(items))
+
+	case err := <-cmd.ErrChan:
+		slog.Default().Log(r.Context(), slog.LevelError, "Actor returned an error for list page.", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }

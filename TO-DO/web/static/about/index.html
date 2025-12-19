@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>About — TO‑DO App</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 2rem; color: #222; }
+    header { margin-bottom: 1rem; }
+    .container { max-width: 720px; }
+    a.button { display:inline-block; padding:0.5rem 0.8rem; background:#007acc; color:#fff; text-decoration:none; border-radius:4px; }
+    button { display:inline-block; padding:0.5rem 0.8rem; background:#007acc; color:#fff; text-decoration:none; border-radius:4px; }
+    footer { margin-top:2rem; font-size:0.9rem; color:#666; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>About this TO‑DO App</h1>
+      <p>A small Go example app used for the GoAcademy exercises — demonstrates HTTP handlers, JSON APIs, structured logging and request tracing.</p>
+    </header>
+
+    <section>
+      <h2>How it works</h2>
+      <ul>
+        <li>REST endpoints under /create, /get, /update, /delete</li>
+        <li>Per-request TraceID is added and exposed via the <code>X-Trace-ID</code> response header</li>
+        <li>Logs use slog and include the traceID field</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Try it</h2>
+      <p>
+        View the to-do list: <a class="button" href="http://localhost:8080/list">View list</a>
+      </p>
+    </section>
+
+    <!--
+      Form for adding a new to-do item.
+      - id="add-todo-form" is used by the script below to attach the submit handler.
+      - Inputs: "name" text and "due" date (browser date widget gives YYYY-MM-DD).
+      
+    -->
+    <form id="add-todo-form">
+        <h2>Add To-Do item</h2>
+
+        <label for="name">Task name:</label>
+        <input type="text" id="name" placeholder="Task name" required>
+
+        <label for="due">Due date:</label>
+        <input type="date" id="due">
+
+        <button class="button" type="submit">Submit</button>
+    </form>
+
+    <script>
+        /* Attach a submit handler to the form to send JSON to the /create API.
+           Steps performed by the script:
+           1. preventDefault() so the browser doesn't perform a normal form post.
+           2. read the name and date inputs.
+           3. convert the browser date (YYYY-MM-DD) to DD-MM-YYYY which the server expects.
+           4. POST JSON { name, due } to the API with Content-Type: application/json.
+           5. alert success/failure and reset the form.
+        */
+        document.getElementById('add-todo-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+    
+            // read and normalise inputs
+            const name = document.getElementById('name').value.trim();
+            const dueInput = document.getElementById('due').value;
+            // Convert YYYY-MM-DD -> DD-MM-YYYY expected by server
+            let due = "";
+            if (dueInput) {
+            const [y, m, d] = dueInput.split('-');
+            due = `${d}-${m}-${y}`;
+            }
+            
+            // send the JSON payload to the server
+            const response = await fetch('http://localhost:8080/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name, due }),
+            });
+            
+            // user feedback
+            if (response.ok) {
+            alert('To-Do item added successfully!');
+            } else {
+            alert('Failed to add To-Do item.');
+            }
+
+            // reset the form
+            e.target.reset();
+        });
+
+    </script>
+
+    <footer>
+      <p>Serving static files from <code>web/static/about/index.html</code></p>
+    </footer>
+  </div>
+</body>
+</html>

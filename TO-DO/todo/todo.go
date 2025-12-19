@@ -12,6 +12,7 @@ import (
 var Filename string = "todos.json"
 
 type Item struct { // To-Do item structure: names must be capitalized to be exported
+	ID        int
 	Name      string
 	Completed bool
 	Due       string
@@ -20,47 +21,53 @@ type Item struct { // To-Do item structure: names must be capitalized to be expo
 var ToDos []Item
 var ToDosMutex sync.RWMutex //
 
-func AddToDo(name string, due string, ctx context.Context) error {
-	task := Item{Name: name, Due: due} //Completed defaults to false
-	ToDos = append(ToDos, task)
+func AddToDo(toDos []Item, id int, name string, due string, ctx context.Context) ([]Item, error) {
+	task := Item{ID: id, Name: name, Due: due} //Completed defaults to false
+	toDos = append(toDos, task)
 	slog.Default().Log(
 		ctx,
 		slog.LevelInfo,
 		"To-do data successfully added",
 		"name", name,
 		"due", due)
-	return nil //must return something of type error
+	return toDos, nil
 }
 
-func RemoveToDo(index int, ctx context.Context) error {
-	ToDos = append(ToDos[:index], ToDos[index+1:]...) //ellipsis to flatten slice
-	slog.Default().Log(
-		ctx,
-		slog.LevelInfo,
-		"To-do data successfully removed",
-		"index", index)
-	return nil //must return something of type error
+func RemoveToDo(toDos []Item, id int, ctx context.Context) ([]Item, error) {
+	for i, item := range toDos {
+		if item.ID == id {
+			toDos = append(toDos[:i], toDos[i+1:]...) //ellipsis to flatten slice
+			slog.Default().Log(
+				ctx,
+				slog.LevelInfo,
+				"To-do data successfully removed",
+				"id", id)
+			return toDos, nil // Return successfully after removing the item.
+		}
+	}
+	// If the loop completes without finding the ID, return an error.
+	return toDos, fmt.Errorf("item with id %d not found", id)
 }
 
-func UpdateToDo(index int, name *string, due *string, completed *bool, ctx context.Context) error {
-	if name != nil {
-		ToDos[index].Name = *name
+func UpdateToDo(toDos []Item, id int, name *string, due *string, completed *bool, ctx context.Context) ([]Item, error) {
+	slog.Default().Log(ctx, slog.LevelInfo, "updating with the following values", "id", id, "name", name, "due", due, "completed", completed)
+	for i, item := range toDos {
+		if item.ID == id {
+			if name != nil {
+				toDos[i].Name = *name
+			}
+			if due != nil {
+				toDos[i].Due = *due
+			}
+			if completed != nil {
+				toDos[i].Completed = *completed
+			}
+			slog.Default().Log(ctx, slog.LevelInfo, "To-do data successfully updated", "id", id)
+			return toDos, nil // Return successfully after updating.
+		}
 	}
-	if due != nil {
-		ToDos[index].Due = *due
-	}
-	if completed != nil {
-		ToDos[index].Completed = *completed
-	}
-	slog.Default().Log(
-		ctx,
-		slog.LevelInfo,
-		"To-do data successfully updated",
-		"index", index,
-		"name_updated", name != nil,
-		"due_updated", due != nil,
-		"completed_updated", completed != nil)
-	return nil //must return something of type error
+	// If the loop completes without finding the ID, return an error.
+	return toDos, fmt.Errorf("item with id %d not found", id)
 }
 
 func SaveToDos(filename string, todos []Item, ctx context.Context) error { //error is a built-in type

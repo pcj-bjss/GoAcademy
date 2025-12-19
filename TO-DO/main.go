@@ -71,35 +71,44 @@ func main() {
 
 	ctx := context.WithValue(context.Background(), traceIDKey, uuid.New().String())
 
+	// Start the actor goroutine. This runs in the background.
+	todo.StartStore(todo.Filename)
+
 	// Set up signal handling to gracefully handle termination signals
 	// SIGINT is Ctrl+C. SIGTERM is a generic termination signal (e.g., from a 'kill' command).
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	var err error
-
-	todo.ToDos, err = todo.LoadToDos(todo.Filename, ctx)
-	if err != nil {
-		slog.Default().Log(
-			ctx,
-			slog.LevelError,
-			"Failed to load to-do data, exiting",
-			"file", "todos.json",
-			"error", err)
-		os.Exit(1)
-	}
-
+	// Set up HTTP handlers
 	http.HandleFunc("/get", api.GetHandler)
 	http.HandleFunc("/create", api.CreateHandler)
 	http.HandleFunc("/update", api.UpdateHandler)
 	http.HandleFunc("/delete", api.DeleteHandler)
+	http.HandleFunc("/list", api.ListHandler)
+	// serve static files for the web frontend
+	http.Handle("/about/", http.StripPrefix("/about/", http.FileServer(http.Dir("web/static/about"))))
 
+	// redirect "/about" (no trailing slash) -> "/about/" so index.html is returned
+	http.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/about/", http.StatusMovedPermanently)
+	})
+
+	// create an http.Server that listens on ServerAddr.
+	// Handler is the DefaultServeMux wrapped by traceIDMiddleware so each request
+	// gets a per-request TraceID placed into r.Context() and an X-Trace-ID header.
 	server := &http.Server{Addr: ServerAddr, Handler: traceIDMiddleware(http.DefaultServeMux)}
+
+	// Start the server in a separate goroutine so the main goroutine can continue
+	// (for example, to wait for OS signals). ListenAndServe blocks while serving.
 	go func() {
+		// When ListenAndServe returns, check the error. http.ErrServerClosed is the
+		// expected error returned when Shutdown() is called for a graceful stop,
+		// so only log errors that are unexpected.
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Default().Log(ctx, slog.LevelError, "HTTP server failed", "error", err)
 		}
 	}()
+	slog.Default().Log(ctx, slog.LevelInfo, "Server started and waiting for requests", "addr", ServerAddr)
 
 	// Block the main goroutine until an interrupt signal is received
 	sig := <-sigChan
@@ -122,14 +131,26 @@ func main() {
 			"error", err)
 	}
 
-	err = todo.SaveToDos(todo.Filename, todo.ToDos, ctx)
-	if err != nil {
+	// Instead of saving directly, send a save command to the actor.
+	slog.Default().Log(ctx, slog.LevelInfo, "Requesting final save from actor before shutdown.")
+	saveCmd := todo.Command{
+		Action:  todo.OpSave,
+		Ctx:     ctx,
+		Result:  make(chan any),
+		ErrChan: make(chan error),
+	}
+	todo.Store <- saveCmd
+
+	// Wait for the actor to confirm the save is complete.
+	select {
+	case <-saveCmd.Result:
+		slog.Default().Log(ctx, slog.LevelInfo, "Final save completed successfully. Exiting.")
+	case err := <-saveCmd.ErrChan:
 		slog.Default().Log(
 			ctx,
 			slog.LevelError,
 			"Application terminated due to error saving updated to-do data",
-			"file", "todos.json",
+			"file", todo.Filename,
 			"error", err)
-		os.Exit(1)
 	}
 }

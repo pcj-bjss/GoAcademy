@@ -131,80 +131,88 @@ func TestSaveToDos(t *testing.T) {
 	tmpFile.Close()
 
 	ctx := context.Background() // Create a dummy context to satisfy logging requirements
-	tmpStruct := []Item{}
-	originalToDos := ToDos
-	ToDos = tmpStruct
-	defer func() { ToDos = originalToDos }()
-	// Add sample todos
-	AddToDo("ToDo 1", "2024-12-01T10:00:00Z", ctx)
-	AddToDo("ToDo 2", "2024-12-02T11:00:00Z", ctx)
+
+	// Create a local slice for testing, not using the global one.
+	todosToSave := []Item{
+		{ID: 1, Name: "ToDo 1", Due: "2024-12-01T10:00:00Z", Completed: false},
+		{ID: 2, Name: "ToDo 2", Due: "2024-12-02T11:00:00Z", Completed: false},
+	}
 
 	// Test 1 (No Error):
-	saveErr := SaveToDos(tmpFileName, ToDos, ctx)
+	saveErr := SaveToDos(tmpFileName, todosToSave, ctx)
 	if saveErr != nil {
 		t.Fatalf("SaveToDos failed unexpectedly: %v", saveErr)
 	}
+
 	// Test 2 (File Content):
 	data, readErr := os.ReadFile(tmpFileName)
 	if readErr != nil {
 		t.Fatalf("Failed to read saved file: %v", readErr)
 	}
+	// Create the expected data structure, matching what was passed to SaveToDos.
 	var expectedContent []Item
-	task1 := Item{Name: "ToDo 1", Due: "2024-12-01T10:00:00Z"} //Completed defaults to false
-	task2 := Item{Name: "ToDo 2", Due: "2024-12-02T11:00:00Z"}
+	task1 := Item{ID: 1, Name: "ToDo 1", Due: "2024-12-01T10:00:00Z", Completed: false}
+	task2 := Item{ID: 2, Name: "ToDo 2", Due: "2024-12-02T11:00:00Z", Completed: false}
 	expectedContent = append(expectedContent, task1)
 	expectedContent = append(expectedContent, task2)
+
+	// Marshal the expected data to JSON for comparison.
 	expectedJSON, err := json.Marshal(expectedContent)
 	if err != nil {
 		t.Fatalf("Failed to marshal expected data: %v", err)
 	}
 
+	// Compare the actual file content with the expected JSON.
 	if string(data) != string(expectedJSON) {
 		t.Errorf("Saved file content does not match expected.\nGot: %s\nWant: %s", string(data), string(expectedJSON))
 	}
 }
 
 func TestAddToDo(t *testing.T) {
-	// Set up a temporary struct to hold todos
-	tmpStruct := []Item{}
-	// Override the global ToDos slice for testing
-	originalToDos := ToDos
-	ToDos = tmpStruct
-	defer func() { ToDos = originalToDos }() // Restore original after test
-	// Test adding a new to-do
+	// Start with an empty local slice for a clean test environment.
+	todos := []Item{}
 	ctx := context.Background() // Create a dummy context to satisfy logging requirements
+
 	todoName := "New Test ToDo"
 	todoDue := "2024-11-30T18:00:00Z"
-	AddToDo(todoName, todoDue, ctx)
+
+	// Call the new AddToDo function, passing the local slice and capturing the returned slice.
+	updatedTodos, err := AddToDo(todos, 1, todoName, todoDue, ctx)
+	if err != nil {
+		t.Fatalf("AddToDo failed unexpectedly: %v", err)
+	}
 
 	// Test 1 (Item Added):
-	if len(ToDos) != 1 {
-		t.Fatalf("Expected 1 todo after addition, got %d", len(ToDos))
+	if len(updatedTodos) != 1 {
+		t.Fatalf("Expected 1 todo after addition, got %d", len(updatedTodos))
 	}
 	// Test 2 (Correct Data):
-	if ToDos[0].Name != todoName || ToDos[0].Due != todoDue || ToDos[0].Completed != false {
-		t.Errorf("Added todo does not match expected values. Got: %+v", ToDos[0])
+	if updatedTodos[0].ID != 1 || updatedTodos[0].Name != todoName || updatedTodos[0].Due != todoDue || updatedTodos[0].Completed != false {
+		t.Errorf("Added todo does not match expected values. Got: %+v", updatedTodos[0])
 	}
 }
 
 func TestRemoveToDo(t *testing.T) {
-	tmpStruct := []Item{}
-	originalToDos := ToDos
-	ToDos = tmpStruct
+	// Start with a local slice with sample data to test against.
+	todos := []Item{
+		{ID: 1, Name: "ToDo 1"},
+		{ID: 5, Name: "ToDo 2 to be removed"}, // Use a non-sequential ID to test ID-based removal
+		{ID: 10, Name: "ToDo 3"},
+	}
 	ctx := context.Background() // Create a dummy context to satisfy logging requirements
-	defer func() { ToDos = originalToDos }()
-	// Add sample todos
-	AddToDo("ToDo 1", "2024-12-01T10:00:00Z", ctx)
-	AddToDo("ToDo 2", "2024-12-02T11:00:00Z", ctx)
-	AddToDo("ToDo 3", "2024-12-03T12:00:00Z", ctx)
-	// Test removing the second to-do (index 1)
-	RemoveToDo(1, ctx)
+
+	// Test removing the item with ID 5
+	updatedTodos, err := RemoveToDo(todos, 5, ctx)
+	if err != nil {
+		t.Fatalf("RemoveToDo failed unexpectedly: %v", err)
+	}
+
 	// Test 1 (Item Removed):
-	if len(ToDos) != 2 {
-		t.Fatalf("Expected 2 todos after removal, got %d", len(ToDos))
+	if len(updatedTodos) != 2 {
+		t.Fatalf("Expected 2 todos after removal, got %d", len(updatedTodos))
 	}
 	// Test 2 (Correct Items Remaining):
-	if ToDos[0].Name != "ToDo 1" || ToDos[1].Name != "ToDo 3" {
-		t.Errorf("Remaining todos do not match expected values. Got: %+v", ToDos)
+	if updatedTodos[0].ID != 1 || updatedTodos[1].ID != 10 {
+		t.Errorf("Remaining todos do not match expected values. Got: %+v", updatedTodos)
 	}
 }

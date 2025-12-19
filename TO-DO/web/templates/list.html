@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>To‑Do List</title>
+    <!--
+    Simple CSS for better readability.
+    .completed CSS class styles completed items to have a line-through.
+    -->
+    <style>
+        body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 2rem; color: #222; }
+        .item { margin-bottom: 0.75rem; }
+        .completed { color: #088; text-decoration: line-through; }
+    </style>
+</head>
+<body>
+    <h1>To‑Do List</h1>
+
+    <!--
+        The dot (.) is the data passed into template.Execute(w, data).
+        In the handler we call Execute(w, items) where items is []todo.Item.
+        `if .` tests whether the value is "non-empty" (nil, zero-length, zero value => false).
+    -->
+    {{ if . }}
+        <ul>
+        <!--
+        range iterates over the top-level dot (the slice).
+        $i is the loop index, $it is the current element.
+        Inside range the dot (.) is the current element unless you capture it in a variable.
+         -->
+        {{ range $i, $it := . }}
+        
+            <li class="item">
+            <!-- Display the item's unique ID -->
+            <strong>#{{ $it.ID }}</strong>
+
+            <!--
+                Access exported struct fields on the element.
+                Note: only exported fields (capitalized) are visible to templates.
+                Example expects $it.Name, $it.Due, $it.Completed.
+                html/template auto-escapes values inserted here to prevent XSS.
+            -->
+
+            {{ if $it.Completed }}
+                <span class="completed">{{ $it.Name }}</span>
+            {{ else }}
+                <span>{{ $it.Name }}</span>
+            {{ end }}
+            &nbsp;– due: {{ $it.Due }}
+            
+            <!--
+                class="complete-btn": used by the script to find all buttons.
+                data-id="{{ $it.ID }}": a custom data-* attribute that holds the item's unique ID. dataset.id in JS reads this.
+                data-* is a lightweight way to attach per-item metadata to DOM elements without encoding state in the DOM text.
+                {{ if $it.Completed }}disabled...{{ end }}: disables the button for already completed items so the UI shows it’s inert and prevents clicks.
+            -->
+            <div class="controls">
+                <button
+                    class="complete-btn"
+                    data-id="{{ $it.ID }}"
+                    {{ if $it.Completed }}disabled aria-disabled="true" title="Already completed"{{ end }}>
+                    Complete
+                </button>
+            </div>
+            </li>
+        {{ end }}
+    </ul>
+    
+<!--
+else branch when the slice is empty or nil
+-->
+    {{ else }}
+        <p>No to-do items.</p>
+    {{ end }}
+    <p><a href="/about/">About</a></p>
+
+    <script>
+        // Attach click handlers to the "Complete" buttons.
+        // On click: PATCH /update { index: <n>, completed: true } then reload on success.
+        
+        //The script waits for DOMContentLoaded to ensure the buttons exist before attaching handlers.
+        document.addEventListener('DOMContentLoaded', function () {
+            //Attaches a click handler to each complete button.
+            document.querySelectorAll('.complete-btn').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    //stops accidental clicks
+                    if (this.disabled) return;
+                    //reads the data-id value and converts to an integer of base 10
+                    const id = parseInt(this.dataset.id, 10);
+                    // check prevents sending invalid indices
+                    if (Number.isNaN(id)) return alert('Invalid ID');
+
+                    try {
+                        //Build and send the request to update the item.
+                        const res = await fetch('/update', {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: id, completed: true })
+                        });
+                        if (!res.ok) {
+                            const txt = await res.text().catch(()=>'');
+                            alert('Update failed: ' + res.status + (txt ? (' - '+txt) : ''));
+                            return;
+                        }
+                        // reload to show updated state (simple approach)
+                        location.reload();
+                        } 
+                    catch (err) {
+                            console.error(err);
+                            alert('Network error while updating item');
+                        }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
