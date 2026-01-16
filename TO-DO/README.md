@@ -106,3 +106,17 @@ To run the benchmarks:
 ```bash 
 go test -bench=. -benchmem ./todo/... 
 ```
+
+### Load Testing 
+A load testing application is included in the todo_loadtest directory to stress test the server. 
+
+1. Start the server:
+
+```bash
+go run main.go
+```
+2. Run the load tester (in a separate terminal):
+
+```bash
+go run loadtest/main.go
+```
