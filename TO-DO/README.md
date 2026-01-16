@@ -98,3 +98,11 @@ To show concurrency pattern in the test, run with verbose enabled:
 ```bash
 go test -v ./todo/... 
 ```
+
+### Benchmarking 
+Benchmark tests are included to measure the performance of adding items directly vs. via the Actor model. 
+
+To run the benchmarks: 
+```bash 
+go test -bench=. -benchmem ./todo/... 
+```

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -121,7 +122,7 @@ func main() {
 	)
 
 	//Initiate graceful shutdown with a timeout context
-	shutdownCtx, cancel := context.WithCancel(ctx)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Default().Log(

@@ -177,3 +177,107 @@ func TestConcurrentUpdates(t *testing.T) {
 		})
 	}
 }
+
+func TestStartStore_LoadsExistingData(t *testing.T) {
+	// 1. SETUP: Create a file with known data
+	tmpFile, err := os.CreateTemp("", "todo_store_existing_*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
+
+	initialData := []Item{{ID: 99, Name: "Existing Task", Due: "01-01-2025"}}
+	data, _ := json.Marshal(initialData)
+	_ = os.WriteFile(tmpFile.Name(), data, 0644)
+	tmpFile.Close()
+
+	// 2. START
+	Store = make(chan Command)
+	StartStore(tmpFile.Name())
+	t.Cleanup(func() { close(Store) })
+
+	// 3. VERIFY: Send OpGet to ensure data was loaded
+	// If the actor processes this command, it means it started successfully.
+	cmd := Command{Action: OpGet, Result: make(chan any)}
+	Store <- cmd
+	result := <-cmd.Result
+	items := result.([]Item)
+
+	if len(items) != 1 || items[0].ID != 99 {
+		t.Errorf("Expected loaded item with ID 99, got %v", items)
+	}
+}
+
+func TestStartStore_HandlesMissingFile(t *testing.T) {
+	// 1. SETUP: Define a filename that does not exist
+	// We use CreateTemp to get a valid path, then delete it immediately.
+	tmpFile, err := os.CreateTemp("", "todo_store_missing_*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename := tmpFile.Name()
+	tmpFile.Close()
+	os.Remove(filename) // Ensure it's gone
+
+	// 2. START
+	Store = make(chan Command)
+	StartStore(filename)
+	t.Cleanup(func() { close(Store) })
+
+	// 3. VERIFY: Send OpGet.
+	// If the actor accepts this command, it means it initialized the empty list successfully.
+	cmd := Command{Action: OpGet, Result: make(chan any)}
+	Store <- cmd
+	result := <-cmd.Result
+	items := result.([]Item)
+
+	if len(items) != 0 {
+		t.Errorf("Expected empty list for missing file, got %d items", len(items))
+	}
+}
+
+func BenchmarkAddToDo_Direct(b *testing.B) {
+	// Benchmark the logic function directly (no actor overhead).
+	// This measures the cost of memory allocation and slice appending.
+	ctx := context.Background()
+	// Start with an empty slice.
+	// Note: In a real scenario, this slice would grow very large during the benchmark loop.
+	// For this micro-benchmark, we are measuring the amortized cost of append().
+	items := []Item{}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// We re-assign items so the slice grows, simulating real usage.
+		items, _ = AddToDo(items, i, "Benchmark Task", "01-01-2025", ctx)
+	}
+}
+
+func BenchmarkActor_Add(b *testing.B) {
+	// Benchmark the full actor round-trip.
+	// This measures the cost of the logic PLUS the overhead of Go channels and context switching.
+
+	// 1. Setup
+	Store = make(chan Command)
+	StartStore("bench_actor.json")
+	// Ensure we stop the actor when the benchmark finishes
+	b.Cleanup(func() { close(Store) })
+
+	// 2. Reset timer so setup doesn't count towards the score
+	b.ResetTimer()
+
+	// 3. The Benchmark Loop
+	for i := 0; i < b.N; i++ {
+		cmd := Command{
+			Action: OpAdd,
+			Item: Item{
+				Name: "Bench Task",
+				Due:  "01-01-2025",
+			},
+			Ctx:     context.Background(),
+			Result:  make(chan any),
+			ErrChan: make(chan error),
+		}
+		Store <- cmd
+		<-cmd.Result // Wait for the operation to complete
+	}
+}
