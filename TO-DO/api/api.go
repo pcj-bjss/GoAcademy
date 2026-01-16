@@ -286,13 +286,13 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cmd := todo.Command{
-		Action:  todo.OpUpdate,
+		Action:  todo.OpDelete,
 		Ctx:     r.Context(),
 		ID:      id,
 		Result:  make(chan any), // The Command creates a new channel specific to the request to receive the response from the actor
 		ErrChan: make(chan error),
 	}
-	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'update' command to actor.")
+	slog.Default().Log(r.Context(), slog.LevelInfo, "Sending 'delete' command to actor.")
 	//cmd is sent to the actor via the Store channel
 	todo.Store <- cmd
 
@@ -301,24 +301,22 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	// The select statement waits on multiple channel operations, allowing us to handle whichever one completes first.
 	// Here, we wait for either a result or an error from the actor.
 	// If the actor sends a result via the Result channel, we handle it.
-	// In the case of OpUpdate, the result will be the Item that was updated.
+	// In the case of OpDelete, the result will be a success string.
 	case result := <-cmd.Result:
 		slog.Default().Log(
 			r.Context(),
 			slog.LevelInfo,
 			"Received successful result from actor.",
-			"id", result.(todo.Item).ID,
-			"name", result.(todo.Item).Name,
-			"due", result.(todo.Item).Due,
+			"result", result,
 		)
 
-		w.WriteHeader(http.StatusCreated) // 201 Created
-		w.Write([]byte(`{"status": "success","message":"To-do item updated successfully."}`))
+		w.WriteHeader(http.StatusOK) // 200 OK
+		w.Write([]byte(`{"status": "success","message":"To-do item deleted successfully."}`))
 		slog.Default().Log(
 			r.Context(),
 			slog.LevelInfo,
 			"Response sent to client.",
-			"status", "201 Created",
+			"status", "200 OK",
 		)
 
 	case err := <-cmd.ErrChan:

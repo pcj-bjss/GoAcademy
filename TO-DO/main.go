@@ -131,21 +131,21 @@ func main() {
 			"error", err)
 	}
 
-	// Instead of saving directly, send a save command to the actor.
-	slog.Default().Log(ctx, slog.LevelInfo, "Requesting final save from actor before shutdown.")
-	saveCmd := todo.Command{
-		Action:  todo.OpSave,
+	// Send the shutdown command to the actor. This ensures it processes any remaining items, saves, and exits.
+	slog.Default().Log(ctx, slog.LevelInfo, "Sending shutdown command to actor.")
+	shutdownCmd := todo.Command{
+		Action:  todo.OpShutdown,
 		Ctx:     ctx,
 		Result:  make(chan any),
 		ErrChan: make(chan error),
 	}
-	todo.Store <- saveCmd
+	todo.Store <- shutdownCmd
 
 	// Wait for the actor to confirm the save is complete.
 	select {
-	case <-saveCmd.Result:
-		slog.Default().Log(ctx, slog.LevelInfo, "Final save completed successfully. Exiting.")
-	case err := <-saveCmd.ErrChan:
+	case <-shutdownCmd.Result:
+		slog.Default().Log(ctx, slog.LevelInfo, "Actor shut down successfully. Exiting.")
+	case err := <-shutdownCmd.ErrChan:
 		slog.Default().Log(
 			ctx,
 			slog.LevelError,

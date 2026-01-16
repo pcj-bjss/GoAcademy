@@ -13,7 +13,7 @@ const (
 	OpGet
 	OpUpdate
 	OpDelete
-	OpSave
+	OpShutdown
 )
 
 // Command is the message we'll send to the actor.
@@ -111,14 +111,15 @@ func StartStore(filename string) {
 				} else {
 					cmd.Result <- "success"
 				}
-			case OpSave:
-				// The save operation is now also a message to the actor.
+			case OpShutdown:
+				// Save the data one last time.
 				err := SaveToDos(filename, ToDos, cmd.Ctx)
 				if err != nil {
 					cmd.ErrChan <- err
 				} else {
 					cmd.Result <- "success"
 				}
+				return // Return from the function to stop the actor goroutine.
 			}
 		}
 	}()

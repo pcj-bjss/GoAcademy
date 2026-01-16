@@ -12,6 +12,7 @@
         body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 2rem; color: #222; }
         .item { margin-bottom: 0.75rem; }
         .completed { color: #088; text-decoration: line-through; }
+        .controls button { margin-right: 0.5rem; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -59,9 +60,11 @@
                 <button
                     class="complete-btn"
                     data-id="{{ $it.ID }}"
-                    {{ if $it.Completed }}disabled aria-disabled="true" title="Already completed"{{ end }}>
-                    Complete
+                    data-completed="{{ $it.Completed }}">
+                    {{ if $it.Completed }}Undo{{ else }}Complete{{ end }}
                 </button>
+                <button class="edit-btn" data-id="{{ $it.ID }}" data-name="{{ $it.Name }}" data-due="{{ $it.Due }}">Edit</button>
+                <button class="delete-btn" data-id="{{ $it.ID }}">Delete</button>
             </div>
             </li>
         {{ end }}
@@ -84,19 +87,20 @@ else branch when the slice is empty or nil
             //Attaches a click handler to each complete button.
             document.querySelectorAll('.complete-btn').forEach(function (btn) {
                 btn.addEventListener('click', async function () {
-                    //stops accidental clicks
-                    if (this.disabled) return;
                     //reads the data-id value and converts to an integer of base 10
                     const id = parseInt(this.dataset.id, 10);
                     // check prevents sending invalid indices
                     if (Number.isNaN(id)) return alert('Invalid ID');
+
+                    const isCompleted = this.dataset.completed === 'true';
+                    const newStatus = !isCompleted;
 
                     try {
                         //Build and send the request to update the item.
                         const res = await fetch('/update', {
                             method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ id: id, completed: true })
+                            body: JSON.stringify({ id: id, completed: newStatus })
                         });
                         if (!res.ok) {
                             const txt = await res.text().catch(()=>'');
@@ -110,6 +114,61 @@ else branch when the slice is empty or nil
                             console.error(err);
                             alert('Network error while updating item');
                         }
+                });
+            });
+
+            // Attach click handlers to "Edit" buttons
+            document.querySelectorAll('.edit-btn').forEach(function(btn) {
+                btn.addEventListener('click', async function() {
+                    const id = parseInt(this.dataset.id, 10);
+                    const currentName = this.dataset.name;
+                    const currentDue = this.dataset.due;
+
+                    const newName = prompt("Update task name:", currentName);
+                    if (newName === null) return;
+
+                    const newDue = prompt("Update due date (DD-MM-YYYY):", currentDue);
+                    if (newDue === null) return;
+                    
+                    const payload = { id: id };
+                    let changed = false;
+
+                    if (newName && newName !== currentName) {
+                        payload.name = newName;
+                        changed = true;
+                    }
+                    if (newDue && newDue !== currentDue) {
+                        payload.due = newDue;
+                        changed = true;
+                    }
+
+                    if (changed) {
+                        try {
+                            const res = await fetch('/update', {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload)
+                            });
+                            if (res.ok) location.reload();
+                            else alert('Update failed');
+                        } catch (err) {
+                            console.error(err);
+                            alert('Error updating item');
+                        }
+                    }
+                });
+            });
+
+            // Attach click handlers to "Delete" buttons
+            document.querySelectorAll('.delete-btn').forEach(function(btn) {
+                btn.addEventListener('click', async function() {
+                    if (!confirm("Are you sure you want to delete this item?")) return;
+                    const id = parseInt(this.dataset.id, 10);
+                    try {
+                        const res = await fetch(`/delete?id=${id}`, { method: 'DELETE' });
+                        if (res.ok) location.reload();
+                        else alert('Delete failed');
+                    } catch (err) { console.error(err); alert('Error deleting item'); }
                 });
             });
         });

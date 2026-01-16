@@ -39,13 +39,13 @@ The API should include a user ID and support multiple users, each with their own
 - No interfaces or receivers
 Remove all interfaces or receiver functions from your application and instead use the static-singleton pattern.
 
-- Graceful shutdown
+- Graceful shutdown*
 When the interrupt signal is sent to the application, it stops accepting incoming http requests and finishes resolving all open http requests before shutting down.
 
 - Publish modules
 Ensure the core todo store logic is in a self contain module and publish V1 to github, then use the published module in the application entry points rather than local one.
 
-- Benchmark
+- Benchmark*
 Use benchmark unit tests to determine the performance of your application. Run a separate application to bombard your code with requests and evaluate the performance.
 
 - pprof
